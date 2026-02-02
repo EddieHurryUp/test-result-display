@@ -1,0 +1,66 @@
+# Maven build output
+target/
+*.class
+
+# IDE files
+.idea/
+*.iml
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.classpath
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# Runtime files
+*.jar
+*.war
+
+# Kwaipilot files
+.kwaipilot/
+
+# Checkstyle files
+checkstyle.xml
+checkstyle-result.xml
+
+# Test coverage
+coverage/
+.cobertura/
+
+# Maven wrapper
+.mvn/
+mvnw
+mvnw.cmd
+
+# Gradle wrapper
+gradle/
+gradlew
+gradlew.bat
+
+# Node.js (if any frontend build tools)
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+
+# Database files
+*.db
+*.sqlite
+*.h2.db
+
+# Backup files
+*.bak
+*.backup

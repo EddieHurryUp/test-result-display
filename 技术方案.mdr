@@ -1,0 +1,1051 @@
+# 测试结果展示系统 - 技术方案
+
+## 1. 技术架构设计
+
+### 1.1 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        前端层 (模拟)                          │
+├─────────────────────────────────────────────────────────────┤
+│  React.js + Ant Design + ECharts + Axios (仅用于API调用示例)   │
+├─────────────────────────────────────────────────────────────┤
+│                        网关层                                 │
+├─────────────────────────────────────────────────────────────┤
+│                    Nginx (负载均衡)                           │
+├─────────────────────────────────────────────────────────────┤
+│                        应用层                                 │
+├─────────────────────────────────────────────────────────────┤
+│  Spring Boot 3.x + Spring MVC + Spring Data JPA + Spring Cache │
+├─────────────────────────────────────────────────────────────┤
+│                        服务层                                 │
+├─────────────────────────────────────────────────────────────┤
+│  ProjectService + TestCaseService + ResultService + MockService│
+├─────────────────────────────────────────────────────────────┤
+│                        数据层                                 │
+├─────────────────────────────────────────────────────────────┤
+│  H2 Database (开发) + MySQL 8.0 (生产) + JPA + Hibernate      │
+├─────────────────────────────────────────────────────────────┤
+│                        基础设施层                              │
+├─────────────────────────────────────────────────────────────┤
+│  Swagger/OpenAPI + Logback + Validation + Java Faker          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 1.2 技术选型理由
+
+#### 1.2.1 后端技术栈
+- **Spring Boot 3.x**：现代化的Java Web框架，提供开箱即用的配置和自动装配
+- **Spring Data JPA**：简化数据库操作，提供强大的ORM功能和查询能力
+- **H2 Database**：内存数据库，开发环境快速启动，支持SQL标准
+- **MySQL 8.0**：生产环境稳定可靠的数据库，支持高并发和大数据量
+- **Spring Cache**：提供缓存抽象，优化统计查询性能
+
+#### 1.2.2 开发工具
+- **Maven**：项目构建和依赖管理
+- **Java Faker**：生成逼真的模拟数据
+- **Swagger/OpenAPI**：自动生成API文档，支持在线测试
+- **JUnit 5 + Mockito**：单元测试和Mock测试框架
+
+### 1.3 系统模块划分
+
+```
+test-result-display/
+├── 📁 config/           # 配置类模块
+│   ├── DatabaseConfig.java      # 数据库配置
+│   ├── SwaggerConfig.java       # API文档配置
+│   └── MockDataConfig.java      # 模拟数据配置
+├── 📁 controller/       # 控制器层
+│   ├── ProjectController.java   # 项目管理接口
+│   ├── TestCaseController.java  # 用例管理接口
+│   ├── ResultController.java    # 结果管理接口
+│   ├── StatisticsController.java # 统计分析接口
+│   └── MockDataController.java  # 数据模拟接口
+├── 📁 service/          # 服务层
+│   ├── ProjectService.java      # 项目业务逻辑
+│   ├── TestCaseService.java     # 用例业务逻辑
+│   ├── ResultService.java       # 结果业务逻辑
+│   ├── StatisticsService.java   # 统计分析业务
+│   └── MockDataService.java     # 数据模拟业务
+├── 📁 repository/       # 数据访问层
+│   ├── ProjectRepository.java   # 项目数据访问
+│   ├── TestCaseRepository.java  # 用例数据访问
+│   └── TestResultRepository.java # 结果数据访问
+├── 📁 model/            # 数据模型层
+│   ├── entity/          # 实体类
+│   ├── dto/             # 数据传输对象
+│   └── request/         # 请求对象
+├── 📁 util/             # 工具类
+│   ├── MockDataGenerator.java   # 模拟数据生成器
+│   └── StatisticsCalculator.java # 统计计算器
+└── 📁 exception/        # 异常处理
+    ├── GlobalExceptionHandler.java # 全局异常处理器
+    └── custom exceptions...       # 自定义异常
+```
+
+## 2. 详细设计
+
+### 2.1 数据库设计
+
+#### 2.1.1 表结构设计
+
+```sql
+-- 项目表
+CREATE TABLE projects (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    type ENUM('unit', 'integration', 'performance', 'ui') NOT NULL,
+    status ENUM('active', 'completed', 'paused') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_project_type (type),
+    INDEX idx_project_status (status),
+    INDEX idx_project_created (created_at)
+);
+
+-- 测试用例表
+CREATE TABLE test_cases (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    priority ENUM('high', 'medium', 'low') DEFAULT 'medium',
+    module VARCHAR(100),
+    tags VARCHAR(500),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    INDEX idx_testcase_project (project_id),
+    INDEX idx_testcase_priority (priority),
+    INDEX idx_testcase_module (module),
+    INDEX idx_testcase_created (created_at)
+);
+
+-- 测试结果表
+CREATE TABLE test_results (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    test_case_id BIGINT NOT NULL,
+    status ENUM('passed', 'failed', 'skipped', 'error') NOT NULL,
+    execution_time INT,
+    error_message TEXT,
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    environment VARCHAR(100),
+    executor VARCHAR(100),
+    FOREIGN KEY (test_case_id) REFERENCES test_cases(id) ON DELETE CASCADE,
+    INDEX idx_result_testcase (test_case_id),
+    INDEX idx_result_status (status),
+    INDEX idx_result_status_time (status, executed_at),
+    INDEX idx_result_executed (executed_at),
+    INDEX idx_result_environment (environment)
+);
+```
+
+#### 2.1.2 索引优化策略
+
+```java
+// 查询场景和对应索引
+// 1. 按项目查询用例: idx_testcase_project
+@Query("SELECT tc FROM TestCase tc WHERE tc.projectId = :projectId")
+List<TestCase> findByProjectId(@Param("projectId") Long projectId);
+
+// 2. 按状态和时间范围查询结果: idx_result_status_time
+@Query("SELECT tr FROM TestResult tr WHERE tr.status = :status AND tr.executedAt BETWEEN :startTime AND :endTime")
+List<TestResult> findByStatusAndTimeRange(@Param("status") TestStatus status, 
+                                         @Param("startTime") LocalDateTime startTime, 
+                                         @Param("endTime") LocalDateTime endTime);
+
+// 3. 按优先级统计用例: idx_testcase_priority
+@Query("SELECT tc.priority, COUNT(tc) FROM TestCase tc GROUP BY tc.priority")
+List<Object[]> countByPriority();
+```
+
+### 2.2 API接口设计
+
+#### 2.2.1 RESTful API规范
+
+```yaml
+# API版本控制
+basePath: /api/v1
+
+# 响应格式统一
+responseFormat:
+  success: boolean
+  data: object
+  message: string
+  timestamp: string
+  code: string
+
+# 错误码规范
+errorCodes:
+  SUCCESS: "000000"
+  PARAM_ERROR: "100001"
+  RESOURCE_NOT_FOUND: "100002"
+  BUSINESS_ERROR: "100003"
+  SYSTEM_ERROR: "999999"
+```
+
+#### 2.2.2 核心接口设计
+
+```java
+// 项目管理接口
+@RestController
+@RequestMapping("/api/v1/projects")
+@Validated
+public class ProjectController {
+    
+    @GetMapping
+    @Operation(summary = "获取项目列表", description = "支持分页、筛选和排序")
+    public ResponseEntity<Page<ProjectDTO>> getProjects(
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "10") int size,
+        @RequestParam(required = false) String type,
+        @RequestParam(required = false) String status,
+        @RequestParam(defaultValue = "created_at") String sortBy,
+        @RequestParam(defaultValue = "desc") String order) {
+        // 实现分页查询
+    }
+    
+    @PostMapping
+    @Operation(summary = "创建项目", description = "创建新的测试项目")
+    public ResponseEntity<ProjectDTO> createProject(
+        @Valid @RequestBody ProjectRequest request) {
+        // 实现项目创建
+    }
+}
+
+// 数据模拟接口
+@RestController
+@RequestMapping("/api/v1/mock")
+public class MockDataController {
+    
+    @PostMapping("/generate-data")
+    @Operation(summary = "生成模拟数据", description = "批量生成测试项目、用例和结果数据")
+    public ResponseEntity<MockDataResponse> generateMockData(
+        @Valid @RequestBody MockDataRequest request) {
+        // 实现数据生成
+    }
+    
+    @PostMapping("/execute-random")
+    @Operation(summary = "随机执行测试", description = "随机选择测试用例执行并生成结果")
+    public ResponseEntity<ExecutionResult> executeRandomTests(
+        @Valid @RequestBody RandomExecutionRequest request) {
+        // 实现随机执行
+    }
+}
+```
+
+### 2.3 核心业务逻辑设计
+
+#### 2.3.1 模拟数据生成算法
+
+```java
+@Component
+public class MockDataGenerator {
+    
+    private final Faker faker = new Faker();
+    
+    // 生成项目数据
+    public List<Project> generateProjects(int count) {
+        List<Project> projects = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            Project project = Project.builder()
+                .name(faker.lorem().sentence(2, 3))
+                .description(faker.lorem().paragraph())
+                .type(TestType.values()[faker.random().nextInt(TestType.values().length)])
+                .status(ProjectStatus.ACTIVE)
+                .createdAt(faker.date().past(30, TimeUnit.DAYS).toInstant()
+                    .atZone(ZoneId.systemDefault()).toLocalDateTime())
+                .build();
+            projects.add(project);
+        }
+        return projects;
+    }
+    
+    // 生成测试用例数据
+    public List<TestCase> generateTestCases(Long projectId, int count) {
+        List<TestCase> testCases = new ArrayList<>();
+        String[] modules = {"用户管理", "订单管理", "支付模块", "权限管理", "数据同步"};
+        Priority[] priorities = {Priority.HIGH, Priority.MEDIUM, Priority.LOW};
+        
+        for (int i = 0; i < count; i++) {
+            TestCase testCase = TestCase.builder()
+                .projectId(projectId)
+                .name(faker.lorem().sentence(3, 4))
+                .description(faker.lorem().sentence(5, 10))
+                .priority(priorities[faker.random().nextInt(priorities.length)])
+                .module(modules[faker.random().nextInt(modules.length)])
+                .tags(generateTags())
+                .createdAt(faker.date().past(30, TimeUnit.DAYS).toInstant()
+                    .atZone(ZoneId.systemDefault()).toLocalDateTime())
+                .build();
+            testCases.add(testCase);
+        }
+        return testCases;
+    }
+    
+    // 生成测试结果数据（基于概率算法）
+    public List<TestResult> generateTestResults(Long testCaseId, int count) {
+        List<TestResult> results = new ArrayList<>();
+        TestStatus[] statuses = {TestStatus.PASSED, TestStatus.FAILED, TestStatus.SKIPPED};
+        double[] probabilities = {0.8, 0.15, 0.05}; // 通过率80%，失败15%，跳过5%
+        
+        for (int i = 0; i < count; i++) {
+            TestStatus status = selectStatusByProbability(statuses, probabilities);
+            TestResult result = TestResult.builder()
+                .testCaseId(testCaseId)
+                .status(status)
+                .executionTime(generateExecutionTime(status))
+                .errorMessage(status == TestStatus.FAILED ? generateErrorMessage() : null)
+                .executedAt(faker.date().past(30, TimeUnit.DAYS).toInstant()
+                    .atZone(ZoneId.systemDefault()).toLocalDateTime())
+                .environment("test-" + faker.random().nextInt(1, 5))
+                .executor("auto-generator")
+                .build();
+            results.add(result);
+        }
+        return results;
+    }
+    
+    // 基于优先级的概率选择算法
+    private TestStatus selectStatusByProbability(TestStatus[] statuses, double[] probabilities, Priority priority) {
+        // 高优先级用例通过率更高
+        double[] adjustedProbabilities = Arrays.copyOf(probabilities, probabilities.length);
+        if (priority == Priority.HIGH) {
+            adjustedProbabilities[0] += 0.1; // 增加通过率
+            adjustedProbabilities[1] -= 0.1; // 减少失败率
+        } else if (priority == Priority.LOW) {
+            adjustedProbabilities[0] -= 0.05; // 减少通过率
+            adjustedProbabilities[1] += 0.05; // 增加失败率
+        }
+        return selectStatusByProbability(statuses, adjustedProbabilities);
+    }
+}
+```
+
+#### 2.3.2 统计分析算法
+
+```java
+@Service
+public class StatisticsService {
+    
+    // 计算整体统计信息
+    public StatisticsSummary getSummary(Long projectId) {
+        StatisticsSummary summary = new StatisticsSummary();
+        
+        // 项目统计
+        long projectCount = projectId == null ? 
+            projectRepository.count() : 1;
+        summary.setTotalProjects(projectCount);
+        
+        // 用例统计
+        long testCaseCount = projectId == null ?
+            testCaseRepository.count() :
+            testCaseRepository.countByProjectId(projectId);
+        summary.setTotalTestCases(testCaseCount);
+        
+        // 执行统计
+        long totalExecutions = projectId == null ?
+            testResultRepository.count() :
+            testResultRepository.countByProjectId(projectId);
+        summary.setTotalExecutions(totalExecutions);
+        
+        // 通过率计算
+        if (totalExecutions > 0) {
+            long passedCount = projectId == null ?
+                testResultRepository.countByStatus(TestStatus.PASSED) :
+                testResultRepository.countByStatusAndProject(TestStatus.PASSED, projectId);
+            summary.setOverallPassRate((double) passedCount / totalExecutions * 100);
+        }
+        
+        // 平均执行时间
+        Double avgExecutionTime = projectId == null ?
+            testResultRepository.getAverageExecutionTime() :
+            testResultRepository.getAverageExecutionTimeByProject(projectId);
+        summary.setAverageExecutionTime(avgExecutionTime != null ? avgExecutionTime.intValue() : 0);
+        
+        return summary;
+    }
+    
+    // 获取趋势数据
+    public TrendData getTrends(Long projectId, int days) {
+        LocalDateTime startTime = LocalDateTime.now().minusDays(days);
+        
+        // 按日统计通过率趋势
+        List<DailyTrend> dailyTrends = testResultRepository.findDailyTrends(projectId, startTime);
+        
+        // 计算移动平均线
+        List<AverageTrend> movingAverages = calculateMovingAverage(dailyTrends, 7);
+        
+        return TrendData.builder()
+            .dailyTrends(dailyTrends)
+            .movingAverages(movingAverages)
+            .build();
+    }
+    
+    // 获取失败分析数据
+    public FailureAnalysis getFailureAnalysis(Long projectId, int limit) {
+        // 获取失败原因统计
+        List<FailureReason> failureReasons = testResultRepository.findFailureReasons(projectId, limit);
+        
+        // 获取失败率最高的测试用例
+        List<FailingTestCase> failingTestCases = testResultRepository.findFailingTestCases(projectId, limit);
+        
+        return FailureAnalysis.builder()
+            .failureReasons(failureReasons)
+            .failingTestCases(failingTestCases)
+            .build();
+    }
+}
+```
+
+### 2.4 性能优化设计
+
+#### 2.4.1 缓存策略
+
+```java
+@Configuration
+@EnableCaching
+public class CacheConfig {
+    
+    @Bean
+    public CacheManager cacheManager() {
+        RedisCacheManager.Builder builder = RedisCacheManager
+            .RedisCacheManagerBuilder
+            .fromConnectionFactory(redisConnectionFactory())
+            .cacheDefaults(cacheConfiguration());
+        return builder.build();
+    }
+    
+    private RedisCacheConfiguration cacheConfiguration() {
+        return RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(30))
+            .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
+            .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(new GenericJackson2JsonRedisSerializer()));
+    }
+}
+
+@Service
+public class StatisticsService {
+    
+    @Cacheable(value = "statistics", key = "#projectId + '-' + #dateRange")
+    public StatisticsSummary getSummaryWithCache(Long projectId, String dateRange) {
+        // 缓存统计结果，减少重复计算
+        return calculateStatistics(projectId, dateRange);
+    }
+    
+    @CacheEvict(value = "statistics", allEntries = true)
+    public void clearStatisticsCache() {
+        // 清除统计缓存
+    }
+}
+```
+
+#### 2.4.2 分页查询优化
+
+```java
+@Repository
+public interface TestResultRepository extends JpaRepository<TestResult, Long> {
+    
+    // 使用原生SQL优化复杂查询
+    @Query(value = "SELECT tr.* FROM test_results tr " +
+                   "JOIN test_cases tc ON tr.test_case_id = tc.id " +
+                   "WHERE (:projectId IS NULL OR tc.project_id = :projectId) " +
+                   "AND (:status IS NULL OR tr.status = :status) " +
+                   "AND tr.executed_at BETWEEN :startTime AND :endTime " +
+                   "ORDER BY tr.executed_at DESC",
+           countQuery = "SELECT COUNT(*) FROM test_results tr " +
+                       "JOIN test_cases tc ON tr.test_case_id = tc.id " +
+                       "WHERE (:projectId IS NULL OR tc.project_id = :projectId) " +
+                       "AND (:status IS NULL OR tr.status = :status) " +
+                       "AND tr.executed_at BETWEEN :startTime AND :endTime",
+           nativeQuery = true)
+    Page<TestResult> findResultsWithComplexFilter(
+        @Param("projectId") Long projectId,
+        @Param("status") String status,
+        @Param("startTime") LocalDateTime startTime,
+        @Param("endTime") LocalDateTime endTime,
+        Pageable pageable);
+}
+```
+
+#### 2.4.3 异步处理
+
+```java
+@Service
+public class MockDataService {
+    
+    @Async
+    @EventListener
+    public void handleBulkDataGeneration(BulkDataGenerationEvent event) {
+        // 异步批量生成数据
+        generateBulkData(event.getProjectCount(), event.getTestCaseCount());
+    }
+    
+    @Scheduled(fixedRate = 60000) // 每分钟执行一次
+    public void scheduledDataGeneration() {
+        // 定时生成模拟数据
+        generateScheduledData();
+    }
+}
+```
+
+## 3. 开发环境配置
+
+### 3.1 项目配置
+
+```yaml
+# application.yml
+spring:
+  profiles:
+    active: dev
+  application:
+    name: test-result-display
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.H2Dialect
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  cache:
+    type: redis
+  redis:
+    host: localhost
+    port: 6379
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+    
+logging:
+  level:
+    com.test.result: DEBUG
+    org.springframework.data.jpa: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+```
+
+### 3.2 Maven依赖配置
+
+```xml
+<dependencies>
+    <!-- Spring Boot Starter -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    
+    <!-- JPA -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    
+    <!-- Database -->
+    <dependency>
+        <groupId>com.h2database</groupId>
+        <artifactId>h2</artifactId>
+        <scope>runtime</scope>
+    </dependency>
+    <dependency>
+        <groupId>mysql</groupId>
+        <artifactId>mysql-connector-java</artifactId>
+        <scope>runtime</scope>
+    </dependency>
+    
+    <!-- API Documentation -->
+    <dependency>
+        <groupId>org.springdoc</groupId>
+        <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        <version>2.0.2</version>
+    </dependency>
+    
+    <!-- Data Validation -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    
+    <!-- Mock Data Generation -->
+    <dependency>
+        <groupId>com.github.javafaker</groupId>
+        <artifactId>javafaker</artifactId>
+        <version>1.0.2</version>
+    </dependency>
+    
+    <!-- Testing -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <optional>true</optional>
+    </dependency>
+</dependencies>
+```
+
+## 4. 测试策略
+
+### 4.1 单元测试
+
+```java
+@SpringBootTest
+class ProjectServiceTest {
+    
+    @Autowired
+    private ProjectService projectService;
+    
+    @MockBean
+    private ProjectRepository projectRepository;
+    
+    @Test
+    @DisplayName("测试创建项目功能")
+    void testCreateProject() {
+        // 准备测试数据
+        ProjectRequest request = ProjectRequest.builder()
+            .name("测试项目")
+            .type(TestType.INTEGRATION)
+            .status(ProjectStatus.ACTIVE)
+            .build();
+        
+        Project savedProject = Project.builder()
+            .id(1L)
+            .name("测试项目")
+            .type(TestType.INTEGRATION)
+            .status(ProjectStatus.ACTIVE)
+            .createdAt(LocalDateTime.now())
+            .build();
+        
+        // Mock Repository行为
+        when(projectRepository.save(any(Project.class))).thenReturn(savedProject);
+        
+        // 执行测试
+        Project result = projectService.createProject(request);
+        
+        // 验证结果
+        assertNotNull(result.getId());
+        assertEquals("测试项目", result.getName());
+        assertEquals(TestType.INTEGRATION, result.getType());
+        
+        // 验证Repository调用
+        verify(projectRepository, times(1)).save(any(Project.class));
+    }
+}
+```
+
+### 4.2 集成测试
+
+```java
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@TestPropertySource(locations = "classpath:application-test.yml")
+class ProjectControllerIntegrationTest {
+    
+    @Autowired
+    private TestRestTemplate restTemplate;
+    
+    @Test
+    @DisplayName("测试项目创建API")
+    void testCreateProjectAPI() throws Exception {
+        ProjectRequest request = ProjectRequest.builder()
+            .name("集成测试项目")
+            .type(TestType.UNIT)
+            .status(ProjectStatus.ACTIVE)
+            .build();
+        
+        ResponseEntity<ProjectDTO> response = restTemplate.postForEntity(
+            "/api/v1/projects",
+            request,
+            ProjectDTO.class
+        );
+        
+        assertEquals(HttpStatus.CREATED, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals("集成测试项目", response.getBody().getName());
+    }
+}
+```
+
+### 4.3 API测试
+
+```java
+@ExtendWith(MockitoExtension.class)
+class ProjectControllerTest {
+    
+    @Mock
+    private ProjectService projectService;
+    
+    @InjectMocks
+    private ProjectController projectController;
+    
+    @Test
+    void testGetProjects() {
+        // Mock Service行为
+        Page<ProjectDTO> mockPage = new PageImpl<>(Arrays.asList(
+            ProjectDTO.builder().id(1L).name("项目1").build(),
+            ProjectDTO.builder().id(2L).name("项目2").build()
+        ));
+        
+        when(projectService.getProjects(anyInt(), anyInt(), any(), any(), any(), any()))
+            .thenReturn(mockPage);
+        
+        // 执行Controller方法
+        ResponseEntity<Page<ProjectDTO>> response = projectController.getProjects(
+            0, 10, null, null, "name", "asc"
+        );
+        
+        // 验证结果
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(2, response.getBody().getContent().size());
+    }
+}
+```
+
+## 5. 部署方案
+
+### 5.1 Docker部署
+
+```dockerfile
+# Dockerfile
+FROM eclipse-temurin:17-jdk-jammy
+WORKDIR /app
+COPY target/test-result-display.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+```
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/test_result_db
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=password
+    depends_on:
+      - mysql
+    volumes:
+      - ./logs:/app/logs
+    
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: test_result_db
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+  
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mysql_data:
+  redis_data:
+```
+
+### 5.2 Kubernetes部署
+
+```yaml
+# deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-result-display
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: test-result-display
+  template:
+    metadata:
+      labels:
+        app: test-result-display
+    spec:
+      containers:
+      - name: test-result-display
+        image: test-result-display:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "prod"
+        - name: SPRING_DATASOURCE_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: db-url
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-result-display-service
+spec:
+  selector:
+    app: test-result-display
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+  type: LoadBalancer
+```
+
+## 6. 性能监控
+
+### 6.1 监控指标
+
+```java
+@Component
+public class MetricsCollector {
+    
+    private final MeterRegistry meterRegistry;
+    private final Counter apiCallCounter;
+    private final Timer responseTimeTimer;
+    
+    public MetricsCollector(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+        this.apiCallCounter = Counter.builder("api_calls_total")
+            .description("Total number of API calls")
+            .register(meterRegistry);
+        this.responseTimeTimer = Timer.builder("api_response_time")
+            .description("API response time")
+            .register(meterRegistry);
+    }
+    
+    @EventListener
+    public void handleApiCall(ApiCallEvent event) {
+        apiCallCounter.increment(
+            Tags.of(
+                Tag.of("endpoint", event.getEndpoint()),
+                Tag.of("method", event.getMethod()),
+                Tag.of("status", event.getStatus())
+            )
+        );
+    }
+}
+```
+
+### 6.2 日志配置
+
+```yaml
+# logback-spring.xml
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/application.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/application.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>100MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxFileSize>1GB</maxFileSize>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>
+```
+
+## 7. 安全考虑
+
+### 7.1 API安全
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf().disable()
+            .authorizeHttpRequests(authz -> authz
+                .requestMatchers("/api/v1/mock/**").permitAll()
+                .requestMatchers("/api/v1/**").authenticated()
+                .anyRequest().permitAll()
+            )
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
+            .httpBasic(Customizer.withDefaults());
+        
+        return http.build();
+    }
+}
+```
+
+### 7.2 数据验证
+
+```java
+@Data
+public class ProjectRequest {
+    
+    @NotBlank(message = "项目名称不能为空")
+    @Size(max = 100, message = "项目名称不能超过100个字符")
+    private String name;
+    
+    @Size(max = 500, message = "项目描述不能超过500个字符")
+    private String description;
+    
+    @NotNull(message = "项目类型不能为空")
+    private TestType type;
+    
+    @NotNull(message = "项目状态不能为空")
+    private ProjectStatus status;
+    
+    @AssertTrue(message = "项目状态必须是有效值")
+    public boolean isValidStatus() {
+        return ProjectStatus.ACTIVE.equals(status) || 
+               ProjectStatus.COMPLETED.equals(status) || 
+               ProjectStatus.PAUSED.equals(status);
+    }
+}
+```
+
+## 8. 扩展性设计
+
+### 8.1 插件化架构
+
+```java
+// 数据源插件接口
+public interface DataSourcePlugin {
+    String getName();
+    List<TestResult> fetchResults(DataSourceConfig config);
+    boolean supports(String type);
+}
+
+// 实现不同数据源插件
+@Component
+public class JiraDataSourcePlugin implements DataSourcePlugin {
+    @Override
+    public List<TestResult> fetchResults(DataSourceConfig config) {
+        // 从Jira获取测试结果
+        return new ArrayList<>();
+    }
+}
+
+@Component
+public class JenkinsDataSourcePlugin implements DataSourcePlugin {
+    @Override
+    public List<TestResult> fetchResults(DataSourceConfig config) {
+        // 从Jenkins获取测试结果
+        return new ArrayList<>();
+    }
+}
+```
+
+### 8.2 事件驱动架构
+
+```java
+// 自定义事件
+public class TestExecutionEvent extends ApplicationEvent {
+    private final TestResult result;
+    private final TestCase testCase;
+    
+    public TestExecutionEvent(Object source, TestResult result, TestCase testCase) {
+        super(source);
+        this.result = result;
+        this.testCase = testCase;
+    }
+}
+
+// 事件监听器
+@Component
+public class TestExecutionListener {
+    
+    @EventListener
+    public void handleTestExecution(TestExecutionEvent event) {
+        // 发送通知
+        sendNotification(event.getResult(), event.getTestCase());
+        
+        // 更新统计缓存
+        updateStatisticsCache(event.getTestCase().getProjectId());
+        
+        // 记录审计日志
+        auditLogger.logTestExecution(event.getResult());
+    }
+}
+```
+
+## 9. 开发计划
+
+### 9.1 详细时间安排
+
+| 阶段 | 时间 | 主要任务 | 交付物 |
+|------|------|----------|--------|
+| **第一阶段** | Day 1-2 | 项目基础框架搭建 | 可启动的Spring Boot应用 |
+| **第二阶段** | Day 3-5 | 核心功能开发 | 完整的CRUD接口和基础服务 |
+| **第三阶段** | Day 6-7 | 数据模拟系统 | MockDataController和生成器 |
+| **第四阶段** | Day 8-9 | 统计分析功能 | StatisticsController和算法 |
+| **第五阶段** | Day 10 | 集成测试和优化 | 完整可部署版本 |
+
+### 9.2 关键里程碑
+
+- **Day 2 End**: 基础框架完成，项目可启动
+- **Day 5 End**: 核心功能完成，基本CRUD可用
+- **Day 7 End**: 数据模拟系统完成，可生成测试数据
+- **Day 9 End**: 统计分析功能完成，API完整
+- **Day 10 End**: 系统测试完成，文档齐全
+
+## 10. 风险评估与应对
+
+### 10.1 技术风险
+
+| 风险 | 概率 | 影响 | 应对措施 |
+|------|------|------|----------|
+| 数据库性能问题 | 中 | 高 | 索引优化、查询缓存、分页查询 |
+| 并发访问冲突 | 低 | 中 | 事务管理、乐观锁、限流机制 |
+| 模拟数据质量 | 低 | 中 | 数据验证、质量检查、算法优化 |
+
+### 10.2 项目风险
+
+| 风险 | 概率 | 影响 | 应对措施 |
+|------|------|------|----------|
+| 需求变更 | 中 | 中 | 模块化设计、接口版本控制 |
+| 性能不达标 | 低 | 高 | 性能测试、优化策略、缓存机制 |
+| 部署问题 | 低 | 中 | 完整的部署文档、Docker化部署 |
+
+这个技术方案提供了完整的技术实现路径，涵盖了从架构设计到部署上线的全流程，可以作为开发团队的技术指导文档。
